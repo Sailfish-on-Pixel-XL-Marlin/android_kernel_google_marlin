@@ -133,6 +133,8 @@ void tty_buffer_free_all(struct tty_port *port)
 	buf->tail = &buf->sentinel;
 
 	atomic_set(&buf->mem_used, 0);
+	if (!IS_ERR_OR_NULL(port->worker_thread))
+		kthread_stop(port->worker_thread);
 }
 
 /**
@@ -369,8 +371,11 @@ void tty_schedule_flip(struct tty_port *port)
 {
 	struct tty_bufhead *buf = &port->buf;
 
-	buf->tail->commit = buf->tail->used;
-	schedule_work(&buf->work);
+	/* paired w/ acquire in flush_to_ldisc(); ensures
+	 * flush_to_ldisc() sees buffer data.
+	 */
+	smp_store_release(&buf->tail->commit, buf->tail->used);
+	queue_kthread_work(&port->worker, &buf->work);
 }
 EXPORT_SYMBOL(tty_schedule_flip);
 
